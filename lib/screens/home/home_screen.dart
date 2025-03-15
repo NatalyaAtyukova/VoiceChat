@@ -6,6 +6,7 @@ import '../../models/chat_model.dart';
 import '../search/search_screen.dart';
 import '../friends/friend_requests_screen.dart';
 import '../chat/chat_screen.dart';
+import '../chat/new_chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -215,9 +216,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const SearchScreen(),
+                    builder: (context) => const NewChatScreen(),
                   ),
-                );
+                ).then((_) => _loadUserData());
               },
               child: const Icon(Icons.add),
             );
@@ -327,9 +328,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const SearchScreen(),
+                          builder: (context) => const NewChatScreen(),
                         ),
-                      );
+                      ).then((_) => _loadUserData());
                     },
                     icon: const Icon(Icons.add),
                     label: const Text('Start New Chat'),
@@ -380,9 +381,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const SearchScreen(),
+                              builder: (context) => const NewChatScreen(),
                             ),
-                          );
+                          ).then((_) => _loadUserData());
                         },
                         icon: const Icon(Icons.add),
                         label: const Text('Find Friends'),

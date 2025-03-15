@@ -8,6 +8,7 @@ import 'screens/search/search_screen.dart';
 import 'screens/friends/friend_requests_screen.dart';
 import 'screens/friends/friends_list_screen.dart';
 import 'screens/chat/chat_screen.dart';
+import 'screens/chat/new_chat_screen.dart';
 import 'services/firebase_service.dart';
 import 'firebase_options.dart';
 
@@ -90,6 +91,7 @@ class MyApp extends StatelessWidget {
           '/search': (context) => const SearchScreen(),
           '/friend_requests': (context) => const FriendRequestsScreen(),
           '/friends': (context) => const FriendsListScreen(),
+          '/new_chat': (context) => const NewChatScreen(),
         },
         onGenerateRoute: (settings) {
           if (settings.name == '/chat') {

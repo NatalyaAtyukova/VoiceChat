@@ -88,57 +88,66 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
   
   Future<void> _startChat(UserModel friend) async {
     try {
+      print('Starting chat with friend: ${friend.id} (${friend.username})');
       final firebaseService = Provider.of<FirebaseService>(context, listen: false);
       
-      // Ищем существующий чат между пользователями
-      final chats = await firebaseService.getUserChats(_currentUserId);
-      ChatModel? existingChat;
-      
-      for (final chat in chats) {
-        if (chat.type == ChatType.direct && 
-            chat.participants.contains(_currentUserId) && 
-            chat.participants.contains(friend.id)) {
-          existingChat = chat;
-          break;
-        }
+      if (_currentUserId.isEmpty) {
+        print('Error: Current user ID is empty');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error: Unable to identify current user')),
+        );
+        return;
       }
       
-      if (existingChat != null) {
-        // Если чат существует, открываем его
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatScreen(
-                chatId: existingChat!.id,
-                chatName: friend.displayName ?? friend.username,
-                chatType: ChatType.direct,
-              ),
-            ),
-          );
-        }
-      } else {
-        // Если чата нет, создаем новый
-        final chatId = await firebaseService.createGroupChat(
-          _currentUserId,
-          '',
-          [friend.id],
+      // Создаем или получаем существующий чат между пользователями
+      print('Current user ID: $_currentUserId');
+      print('Friend ID: ${friend.id}');
+      
+      // Показываем индикатор загрузки
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+      
+      final chatId = await firebaseService.createDirectChat(_currentUserId, friend.id);
+      print('Chat ID received: $chatId');
+      
+      // Закрываем диалог загрузки
+      if (mounted) {
+        Navigator.pop(context);
+      }
+      
+      if (chatId.isEmpty) {
+        print('Error: Received empty chat ID');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error: Failed to create or find chat')),
         );
-        
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatScreen(
-                chatId: chatId,
-                chatName: friend.displayName ?? friend.username,
-                chatType: ChatType.direct,
-              ),
+        return;
+      }
+      
+      if (mounted) {
+        print('Navigating to chat screen with ID: $chatId');
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              chatId: chatId,
+              chatName: friend.displayName ?? friend.username,
+              chatType: ChatType.direct,
             ),
-          );
-        }
+          ),
+        );
       }
     } catch (e) {
+      // Закрываем диалог загрузки, если он открыт
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+      
+      print('Error in _startChat: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error starting chat: ${e.toString()}')),
       );

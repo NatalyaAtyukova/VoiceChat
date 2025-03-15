@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/firebase_service.dart';
 import '../../models/user_model.dart';
+import '../chat/chat_screen.dart';
+import '../../models/chat_model.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -121,6 +123,32 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  Future<void> _startChat(UserModel user) async {
+    try {
+      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
+      
+      // Создаем или получаем существующий чат между пользователями
+      final chatId = await firebaseService.createDirectChat(_currentUserId, user.id);
+      
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              chatId: chatId,
+              chatName: user.displayName ?? user.username,
+              chatType: ChatType.direct,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error starting chat: ${e.toString()}')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -187,7 +215,10 @@ class _SearchScreenState extends State<SearchScreen> {
                             subtitle: Text('@${user.username}'),
                             trailing: _buildActionButton(user),
                             onTap: () {
-                              // TODO: Navigate to user profile
+                              // Если пользователь уже в друзьях, открываем чат
+                              if (_currentUser != null && _currentUser!.friends.contains(user.id)) {
+                                _startChat(user);
+                              }
                             },
                           );
                         },
@@ -201,10 +232,19 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildActionButton(UserModel user) {
     // Если пользователь уже в друзьях
     if (_currentUser != null && _currentUser!.friends.contains(user.id)) {
-      return const Chip(
-        label: Text('Friend'),
-        backgroundColor: Colors.green,
-        labelStyle: TextStyle(color: Colors.white),
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Chip(
+            label: Text('Friend'),
+            backgroundColor: Colors.green,
+            labelStyle: TextStyle(color: Colors.white),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chat, color: Colors.blue),
+            onPressed: () => _startChat(user),
+          ),
+        ],
       );
     }
     

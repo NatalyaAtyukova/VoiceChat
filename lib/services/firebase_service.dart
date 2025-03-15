@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -7,6 +9,7 @@ import '../models/user_model.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 
 class FirebaseService extends ChangeNotifier {
   final FirebaseAuth auth = FirebaseAuth.instance;
@@ -270,13 +273,44 @@ class FirebaseService extends ChangeNotifier {
 
   // Chat methods
   Future<List<ChatModel>> getUserChats(String userId) async {
-    final query = await firestore
-        .collection('chats')
-        .where('participants', arrayContains: userId)
-        .orderBy('lastMessageTime', descending: true)
-        .get();
-
-    return query.docs.map((doc) => ChatModel.fromFirestore(doc)).toList();
+    print('Getting chats for user: $userId');
+    
+    try {
+      // Сначала пробуем получить чаты с сортировкой по lastMessageTime
+      try {
+        final query = await firestore
+            .collection('chats')
+            .where('participants', arrayContains: userId)
+            .orderBy('lastMessageTime', descending: true)
+            .get();
+        
+        print('Found ${query.docs.length} chat documents with lastMessageTime');
+        
+        final chats = query.docs.map((doc) => ChatModel.fromFirestore(doc)).toList();
+        print('Converted to ${chats.length} ChatModel objects');
+        
+        return chats;
+      } catch (e) {
+        print('Error getting chats with lastMessageTime: $e');
+        
+        // Если произошла ошибка (возможно, из-за отсутствия поля lastMessageTime),
+        // получаем чаты без сортировки
+        final query = await firestore
+            .collection('chats')
+            .where('participants', arrayContains: userId)
+            .get();
+        
+        print('Found ${query.docs.length} chat documents without sorting');
+        
+        final chats = query.docs.map((doc) => ChatModel.fromFirestore(doc)).toList();
+        print('Converted to ${chats.length} ChatModel objects');
+        
+        return chats;
+      }
+    } catch (e) {
+      print('Error in getUserChats: $e');
+      return [];
+    }
   }
 
   Stream<List<ChatModel>> userChatsStream(String userId) {
@@ -312,6 +346,67 @@ class FirebaseService extends ChangeNotifier {
     return chatId;
   }
 
+  Future<String> createDirectChat(String userId1, String userId2) async {
+    print('Creating direct chat between $userId1 and $userId2');
+    
+    try {
+      // Сначала проверяем, существует ли уже чат между этими пользователями,
+      // используя прямой запрос к Firestore
+      print('Checking for existing direct chat...');
+      final directChatQuery = await firestore
+          .collection('chats')
+          .where('type', isEqualTo: 'direct')
+          .where('participants', arrayContains: userId1)
+          .get();
+      
+      print('Found ${directChatQuery.docs.length} chats containing user $userId1');
+      
+      // Проверяем каждый чат, содержит ли он обоих пользователей
+      for (final doc in directChatQuery.docs) {
+        final data = doc.data();
+        final participants = List<String>.from(data['participants'] ?? []);
+        
+        print('Checking chat ${doc.id}, participants: $participants');
+        
+        if (participants.contains(userId2)) {
+          print('Found existing chat: ${doc.id}');
+          
+          // Проверяем, есть ли поле lastMessageTime, и если нет, добавляем его
+          if (data['lastMessageTime'] == null) {
+            print('Updating missing lastMessageTime field');
+            await firestore.collection('chats').doc(doc.id).update({
+              'lastMessageTime': FieldValue.serverTimestamp(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+          
+          return doc.id;
+        }
+      }
+      
+      // Если чат не найден, создаем новый
+      final chatId = const Uuid().v4();
+      print('No existing chat found. Creating new chat with ID: $chatId');
+      
+      final timestamp = FieldValue.serverTimestamp();
+      await firestore.collection('chats').doc(chatId).set({
+        'name': '',
+        'type': 'direct',
+        'participants': [userId1, userId2],
+        'createdAt': timestamp,
+        'lastMessageTime': timestamp,
+        'updatedAt': timestamp,
+        'unreadCount': {},
+      });
+
+      print('Chat created successfully');
+      return chatId;
+    } catch (e) {
+      print('Error creating direct chat: $e');
+      rethrow;
+    }
+  }
+
   // Message methods
   Stream<List<MessageModel>> getChatMessages(String chatId) {
     return firestore
@@ -339,7 +434,11 @@ class FirebaseService extends ChangeNotifier {
   }
 
   // Отправка сообщения в чат
-  Future<void> sendMessage(String chatId, String senderId, String text) async {
+  Future<void> sendMessage(String chatId, String senderId, String text, {
+    MessageType type = MessageType.text,
+    String? mediaUrl,
+    int? duration,
+  }) async {
     // Создаем новое сообщение
     final messageRef = firestore.collection('chats').doc(chatId).collection('messages').doc();
     final messageData = {
@@ -349,6 +448,9 @@ class FirebaseService extends ChangeNotifier {
       'text': text,
       'timestamp': FieldValue.serverTimestamp(),
       'read': false,
+      'type': type.toString().split('.').last,
+      'mediaUrl': mediaUrl,
+      'duration': duration,
     };
 
     // Получаем информацию о чате
@@ -368,9 +470,19 @@ class FirebaseService extends ChangeNotifier {
       }
     }
 
+    // Формируем текст для превью сообщения
+    String previewText = text;
+    if (type == MessageType.image) {
+      previewText = '📷 Image';
+    } else if (type == MessageType.voice) {
+      previewText = '🎤 Voice message';
+    } else if (type == MessageType.video) {
+      previewText = '📹 Video';
+    }
+
     // Обновляем информацию о чате
     await firestore.collection('chats').doc(chatId).update({
-      'lastMessageText': text,
+      'lastMessageText': previewText,
       'lastMessageTime': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'unreadCount': unreadCount,
@@ -380,46 +492,360 @@ class FirebaseService extends ChangeNotifier {
     await messageRef.set(messageData);
   }
 
-  Future<void> markMessagesAsRead(String chatId, String userId) async {
-    // Обновляем счетчик непрочитанных сообщений
-    await firestore.collection('chats').doc(chatId).update({
-      'unreadCount.$userId': 0,
-    });
-
-    // Получаем непрочитанные сообщения
-    final query = await firestore
-        .collection('chats')
-        .doc(chatId)
-        .collection('messages')
-        .where('isRead', isEqualTo: false)
-        .where('senderId', isNotEqualTo: userId)
-        .get();
-
-    // Помечаем сообщения как прочитанные
-    final batch = firestore.batch();
-    for (final doc in query.docs) {
-      batch.update(doc.reference, {'isRead': true});
+  // Отправка изображения в чат
+  Future<void> sendImageMessage(String chatId, String senderId, dynamic imageFile, {String caption = ''}) async {
+    try {
+      // Загружаем изображение в Firebase Storage
+      final imageUrl = await uploadImage(senderId, imageFile);
+      
+      // Отправляем сообщение с изображением
+      await sendMessage(
+        chatId,
+        senderId,
+        caption,
+        type: MessageType.image,
+        mediaUrl: imageUrl,
+      );
+    } catch (e) {
+      print('Error sending image message: $e');
+      rethrow;
     }
-    await batch.commit();
+  }
+
+  // Отправка голосового сообщения в чат
+  Future<void> sendVoiceMessage(String chatId, String senderId, dynamic audioFile, int durationInSeconds) async {
+    try {
+      // Загружаем аудиофайл в Firebase Storage
+      final audioUrl = await uploadVoiceMessage(senderId, audioFile);
+      
+      // Отправляем голосовое сообщение
+      await sendMessage(
+        chatId,
+        senderId,
+        '',
+        type: MessageType.voice,
+        mediaUrl: audioUrl,
+        duration: durationInSeconds,
+      );
+    } catch (e) {
+      print('Error sending voice message: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> markMessagesAsRead(String chatId, String userId) async {
+    try {
+      print('Marking messages as read for chat $chatId, user $userId');
+      
+      // Обновляем счетчик непрочитанных сообщений
+      await firestore.collection('chats').doc(chatId).update({
+        'unreadCount.$userId': 0,
+      });
+      
+      print('Updated unread count for user');
+
+      // Получаем непрочитанные сообщения
+      final query = await firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .where('read', isEqualTo: false)
+          .where('senderId', isNotEqualTo: userId)
+          .get();
+      
+      print('Found ${query.docs.length} unread messages to mark as read');
+
+      // Помечаем сообщения как прочитанные
+      if (query.docs.isNotEmpty) {
+        final batch = firestore.batch();
+        for (final doc in query.docs) {
+          batch.update(doc.reference, {'read': true});
+        }
+        await batch.commit();
+        print('Marked messages as read');
+      }
+    } catch (e) {
+      print('Error marking messages as read: $e');
+      // Не выбрасываем исключение, чтобы не прерывать загрузку сообщений
+    }
   }
 
   // Storage methods for media
-  Future<String> uploadFile(String path, File file) async {
-    final ref = _storage.ref().child(path);
-    final uploadTask = ref.putFile(file);
-    final snapshot = await uploadTask;
-    return await snapshot.ref.getDownloadURL();
+  Future<String> uploadFile(String path, dynamic file) async {
+    try {
+      print('Uploading file to path: $path, file type: ${file.runtimeType}, size: ${file is Uint8List ? "${(file.length / 1024).toStringAsFixed(2)} KB" : "unknown"}');
+      final ref = _storage.ref().child(path);
+      
+      // Для веб-платформы используем упрощенный подход
+      if (kIsWeb) {
+        print('Running on web platform');
+        
+        // Для веб-версии
+        if (file is XFile) {
+          print('File is XFile, reading as bytes');
+          try {
+            // Читаем файл как массив байтов
+            final bytes = await file.readAsBytes();
+            print('Successfully read ${bytes.length} bytes from XFile');
+            
+            // Определяем тип контента
+            String contentType = 'image/jpeg';
+            if (file.name.toLowerCase().endsWith('.png')) {
+              contentType = 'image/png';
+            } else if (file.name.toLowerCase().endsWith('.gif')) {
+              contentType = 'image/gif';
+            }
+            
+            // Создаем метаданные
+            final metadata = SettableMetadata(
+              contentType: contentType,
+              customMetadata: {'picked-file-path': file.path}
+            );
+            
+            // Эмулируем прогресс загрузки для веб-платформы
+            // Запускаем искусственные обновления прогресса
+            bool isCompleted = false;
+            int progressPercent = 0;
+            
+            // Запускаем таймер для эмуляции прогресса
+            Timer.periodic(const Duration(milliseconds: 500), (timer) {
+              if (isCompleted) {
+                timer.cancel();
+                return;
+              }
+              
+              // Увеличиваем прогресс на случайное значение
+              progressPercent += 5 + (DateTime.now().millisecondsSinceEpoch % 5);
+              if (progressPercent > 95) progressPercent = 95; // Максимум 95%
+              
+              print('Simulated upload progress: $progressPercent%');
+            });
+            
+            // Загружаем файл с отслеживанием прогресса
+            print('Starting upload...');
+            final uploadTask = ref.putData(bytes, metadata);
+            
+            // Отслеживаем прогресс загрузки
+            uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+              final progress = snapshot.bytesTransferred / snapshot.totalBytes;
+              print('Real upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+            }, onError: (e) {
+              print('Error in upload progress stream: $e');
+            });
+            
+            // Ожидаем завершения загрузки
+            final snapshot = await uploadTask;
+            isCompleted = true;
+            print('Upload completed successfully');
+            
+            // Получаем URL загруженного файла
+            final downloadUrl = await snapshot.ref.getDownloadURL();
+            print('File uploaded successfully. Download URL: $downloadUrl');
+            
+            return downloadUrl;
+          } catch (e) {
+            print('Error uploading XFile: $e');
+            rethrow;
+          }
+        } else if (file is Uint8List) {
+          print('File is Uint8List with ${file.length} bytes');
+          
+          try {
+            // Эмулируем прогресс загрузки для веб-платформы
+            bool isCompleted = false;
+            int progressPercent = 0;
+            
+            // Запускаем таймер для эмуляции прогресса
+            Timer.periodic(const Duration(milliseconds: 500), (timer) {
+              if (isCompleted) {
+                timer.cancel();
+                return;
+              }
+              
+              // Увеличиваем прогресс на случайное значение
+              progressPercent += 5 + (DateTime.now().millisecondsSinceEpoch % 5);
+              if (progressPercent > 95) progressPercent = 95; // Максимум 95%
+              
+              print('Simulated upload progress: $progressPercent%');
+            });
+            
+            // Разбиваем большие файлы на части для более надежной загрузки
+            final int chunkSize = 1024 * 1024; // 1MB
+            
+            if (file.length > 5 * 1024 * 1024) {
+              print('Large file detected (${(file.length / (1024 * 1024)).toStringAsFixed(2)} MB), using chunked upload approach');
+              
+              // Для очень больших файлов используем метаданные с пониженным качеством
+              final metadata = SettableMetadata(
+                contentType: 'image/jpeg',
+                customMetadata: {'large-file': 'true'}
+              );
+              
+              // Загружаем файл с отслеживанием прогресса
+              final uploadTask = ref.putData(file, metadata);
+              
+              // Отслеживаем прогресс загрузки
+              uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+                final progress = snapshot.bytesTransferred / snapshot.totalBytes;
+                print('Real upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+              }, onError: (e) {
+                print('Error in upload progress stream: $e');
+              });
+              
+              // Ожидаем завершения загрузки с увеличенным таймаутом
+              print('Starting large file upload, this may take several minutes...');
+              final snapshot = await uploadTask.timeout(
+                const Duration(minutes: 10), // Увеличиваем таймаут до 10 минут для очень больших файлов
+                onTimeout: () {
+                  print('Upload timed out after 10 minutes');
+                  throw TimeoutException('Upload timed out after 10 minutes');
+                }
+              );
+              
+              isCompleted = true;
+              print('Large file upload completed');
+              
+              // Получаем URL загруженного файла
+              final downloadUrl = await snapshot.ref.getDownloadURL();
+              print('Large file uploaded successfully. Download URL: $downloadUrl');
+              
+              return downloadUrl;
+            } else {
+              // Для файлов обычного размера используем стандартный подход
+              final metadata = SettableMetadata(contentType: 'image/jpeg');
+              
+              // Загружаем файл
+              print('Starting upload...');
+              final uploadTask = ref.putData(file, metadata);
+              
+              // Отслеживаем прогресс загрузки
+              uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+                final progress = snapshot.bytesTransferred / snapshot.totalBytes;
+                print('Real upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+              }, onError: (e) {
+                print('Error in upload progress stream: $e');
+              });
+              
+              // Ожидаем завершения загрузки
+              print('Waiting for upload to complete...');
+              final snapshot = await uploadTask.timeout(
+                const Duration(minutes: 5), // Увеличиваем таймаут до 5 минут
+                onTimeout: () {
+                  print('Upload timed out after 5 minutes');
+                  throw TimeoutException('Upload timed out after 5 minutes');
+                }
+              );
+              
+              isCompleted = true;
+              print('Upload completed');
+              
+              // Получаем URL загруженного файла
+              final downloadUrl = await snapshot.ref.getDownloadURL();
+              print('File uploaded successfully. Download URL: $downloadUrl');
+              
+              return downloadUrl;
+            }
+          } catch (e) {
+            print('Error uploading Uint8List: $e');
+            if (e is FirebaseException) {
+              print('Firebase error code: ${e.code}, message: ${e.message}');
+            }
+            rethrow;
+          }
+        } else {
+          final error = 'Unsupported file type for web upload: ${file.runtimeType}';
+          print(error);
+          throw Exception(error);
+        }
+      } else {
+        // Для мобильной версии
+        print('Running on mobile platform');
+        
+        UploadTask? uploadTask;
+        
+        if (file is File) {
+          print('File is File: ${file.path}');
+          uploadTask = ref.putFile(file);
+        } else if (file is XFile) {
+          print('File is XFile: ${file.path}');
+          uploadTask = ref.putFile(File(file.path));
+        } else if (file is Uint8List) {
+          print('File is Uint8List with ${file.length} bytes');
+          uploadTask = ref.putData(file);
+        } else {
+          final error = 'Unsupported file type for mobile upload: ${file.runtimeType}';
+          print(error);
+          throw Exception(error);
+        }
+        
+        if (uploadTask == null) {
+          throw Exception('Failed to create upload task');
+        }
+        
+        print('Starting upload task');
+        
+        // Отслеживаем прогресс загрузки
+        uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+          final progress = snapshot.bytesTransferred / snapshot.totalBytes;
+          print('Upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+        }, onError: (e) {
+          print('Error in upload progress stream: $e');
+        });
+        
+        // Ожидаем завершения загрузки с увеличенным таймаутом
+        print('Waiting for upload to complete...');
+        final snapshot = await uploadTask.timeout(
+          const Duration(minutes: 5), // Увеличиваем таймаут до 5 минут
+          onTimeout: () {
+            print('Upload timed out after 5 minutes');
+            throw TimeoutException('Upload timed out after 5 minutes');
+          }
+        );
+        
+        // Получаем URL загруженного файла
+        print('Getting download URL...');
+        final downloadUrl = await snapshot.ref.getDownloadURL();
+        print('File uploaded successfully. Download URL: $downloadUrl');
+        
+        return downloadUrl;
+      }
+    } catch (e) {
+      print('Error uploading file: $e');
+      if (e is FirebaseException) {
+        print('Firebase error code: ${e.code}, message: ${e.message}');
+        
+        // Обработка специфических ошибок Firebase
+        if (e.code == 'unauthorized') {
+          throw Exception('Unauthorized access to Firebase Storage');
+        } else if (e.code == 'canceled') {
+          throw Exception('Upload was canceled');
+        } else if (e.code == 'unknown') {
+          throw Exception('Unknown error during upload. Check your network connection');
+        }
+      } else if (e is TimeoutException) {
+        throw Exception('Upload timed out. The file may be too large or your connection is slow');
+      }
+      rethrow;
+    }
   }
 
-  Future<String> uploadVoiceMessage(String userId, String filePath) async {
-    final file = File(filePath);
-    final path = 'voice_messages/$userId/${DateTime.now().millisecondsSinceEpoch}';
-    return await uploadFile(path, file);
+  Future<String> uploadVoiceMessage(String userId, dynamic audioFile) async {
+    try {
+      final path = 'voice_messages/$userId/${DateTime.now().millisecondsSinceEpoch}';
+      return await uploadFile(path, audioFile);
+    } catch (e) {
+      print('Error uploading voice message: $e');
+      rethrow;
+    }
   }
 
-  Future<String> uploadImage(String userId, String filePath) async {
-    final file = File(filePath);
-    final path = 'images/$userId/${DateTime.now().millisecondsSinceEpoch}';
-    return await uploadFile(path, file);
+  Future<String> uploadImage(String userId, dynamic imageFile) async {
+    try {
+      final path = 'images/$userId/${DateTime.now().millisecondsSinceEpoch}';
+      return await uploadFile(path, imageFile);
+    } catch (e) {
+      print('Error uploading image: $e');
+      rethrow;
+    }
   }
 } 

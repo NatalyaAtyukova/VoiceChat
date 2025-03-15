@@ -14,6 +14,9 @@ class MessageModel {
   final String text;
   final DateTime timestamp;
   final bool read;
+  final MessageType type;
+  final String? mediaUrl;
+  final int? duration; // Длительность голосового сообщения в секундах
 
   MessageModel({
     required this.id,
@@ -22,6 +25,9 @@ class MessageModel {
     required this.text,
     required this.timestamp,
     required this.read,
+    this.type = MessageType.text,
+    this.mediaUrl,
+    this.duration,
   });
 
   factory MessageModel.fromMap(Map<String, dynamic> map) {
@@ -32,6 +38,9 @@ class MessageModel {
       text: map['text'] ?? '',
       timestamp: (map['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
       read: map['read'] ?? false,
+      type: _getMessageTypeFromString(map['type'] ?? 'text'),
+      mediaUrl: map['mediaUrl'],
+      duration: map['duration'],
     );
   }
 
@@ -43,6 +52,9 @@ class MessageModel {
       'text': text,
       'timestamp': Timestamp.fromDate(timestamp),
       'read': read,
+      'type': type.toString().split('.').last,
+      'mediaUrl': mediaUrl,
+      'duration': duration,
     };
   }
 
@@ -53,6 +65,9 @@ class MessageModel {
     String? text,
     DateTime? timestamp,
     bool? read,
+    MessageType? type,
+    String? mediaUrl,
+    int? duration,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -61,6 +76,23 @@ class MessageModel {
       text: text ?? this.text,
       timestamp: timestamp ?? this.timestamp,
       read: read ?? this.read,
+      type: type ?? this.type,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      duration: duration ?? this.duration,
     );
+  }
+  
+  static MessageType _getMessageTypeFromString(String typeStr) {
+    switch (typeStr) {
+      case 'image':
+        return MessageType.image;
+      case 'voice':
+        return MessageType.voice;
+      case 'video':
+        return MessageType.video;
+      case 'text':
+      default:
+        return MessageType.text;
+    }
   }
 } 

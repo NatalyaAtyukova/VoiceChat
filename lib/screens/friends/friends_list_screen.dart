@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/firebase_service.dart';
+import '../../services/api_service.dart';
 import '../../models/user_model.dart';
 import '../chat/chat_screen.dart';
 import '../../models/chat_model.dart';
+import '../../models/user.dart';
+import '../../models/chat.dart';
 
 class FriendsListScreen extends StatefulWidget {
   const FriendsListScreen({super.key});
@@ -14,7 +16,7 @@ class FriendsListScreen extends StatefulWidget {
 
 class _FriendsListScreenState extends State<FriendsListScreen> {
   bool _isLoading = true;
-  List<UserModel> _friends = [];
+  List<User> _friends = [];
   String _currentUserId = '';
   
   @override
@@ -29,28 +31,30 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
     });
     
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      final currentUser = firebaseService.auth.currentUser;
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final currentUser = apiService.currentUser;
       
       if (currentUser == null) {
         return;
       }
       
-      _currentUserId = currentUser.uid;
+      _currentUserId = currentUser.id;
       
       // Получаем данные текущего пользователя
-      final user = await firebaseService.getUserById(_currentUserId);
+      final userData = await apiService.getUserById(_currentUserId);
       
-      if (user == null) {
+      if (userData == null) {
         return;
       }
       
+      final user = User.fromJson(userData);
+      
       // Загружаем информацию о друзьях
-      final friendsList = <UserModel>[];
+      final friendsList = <User>[];
       for (final friendId in user.friends) {
-        final friend = await firebaseService.getUserById(friendId);
-        if (friend != null) {
-          friendsList.add(friend);
+        final friendData = await apiService.getUserById(friendId);
+        if (friendData != null) {
+          friendsList.add(User.fromJson(friendData));
         }
       }
       
@@ -70,8 +74,8 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
   
   Future<void> _removeFriend(String friendId) async {
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      await firebaseService.removeFriend(_currentUserId, friendId);
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.removeFriend(friendId);
       
       // Обновляем список друзей
       await _loadFriends();
@@ -86,10 +90,10 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
     }
   }
   
-  Future<void> _startChat(UserModel friend) async {
+  Future<void> _startChat(User friend) async {
     try {
       print('Starting chat with friend: ${friend.id} (${friend.username})');
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
+      final apiService = Provider.of<ApiService>(context, listen: false);
       
       if (_currentUserId.isEmpty) {
         print('Error: Current user ID is empty');
@@ -98,10 +102,6 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
         );
         return;
       }
-      
-      // Создаем или получаем существующий чат между пользователями
-      print('Current user ID: $_currentUserId');
-      print('Friend ID: ${friend.id}');
       
       // Показываем индикатор загрузки
       showDialog(
@@ -112,15 +112,17 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
         ),
       );
       
-      final chatId = await firebaseService.createDirectChat(_currentUserId, friend.id);
-      print('Chat ID received: $chatId');
+      // Создаем или получаем существующий чат между пользователями
+      final chatData = await apiService.createChat(friend.id);
+      final chat = Chat.fromJson(chatData);
+      print('Chat ID received: ${chat.id}');
       
       // Закрываем диалог загрузки
       if (mounted) {
         Navigator.pop(context);
       }
       
-      if (chatId.isEmpty) {
+      if (chat.id.isEmpty) {
         print('Error: Received empty chat ID');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Error: Failed to create or find chat')),
@@ -129,14 +131,15 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
       }
       
       if (mounted) {
-        print('Navigating to chat screen with ID: $chatId');
+        print('Navigating to chat screen with ID: ${chat.id}');
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatScreen(
-              chatId: chatId,
+              chatId: chat.id,
               chatName: friend.displayName ?? friend.username,
               chatType: ChatType.direct,
+              otherUser: friend,
             ),
           ),
         );
@@ -237,7 +240,7 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
     );
   }
   
-  void _showRemoveConfirmation(UserModel friend) {
+  void _showRemoveConfirmation(User friend) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

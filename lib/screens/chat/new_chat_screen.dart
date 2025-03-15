@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/firebase_service.dart';
-import '../../models/user_model.dart';
-import '../../models/chat_model.dart';
+import '../../services/api_service.dart';
+import '../../models/user.dart';
+import '../../models/chat.dart';
 import 'chat_screen.dart';
 
 class NewChatScreen extends StatefulWidget {
@@ -14,8 +14,8 @@ class NewChatScreen extends StatefulWidget {
 
 class _NewChatScreenState extends State<NewChatScreen> {
   final _searchController = TextEditingController();
-  List<UserModel> _friends = [];
-  List<UserModel> _filteredFriends = [];
+  List<User> _friends = [];
+  List<User> _filteredFriends = [];
   bool _isLoading = true;
   String _currentUserId = '';
   
@@ -37,28 +37,30 @@ class _NewChatScreenState extends State<NewChatScreen> {
     });
     
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      final currentUser = firebaseService.auth.currentUser;
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final currentUser = apiService.currentUser;
       
       if (currentUser == null) {
         return;
       }
       
-      _currentUserId = currentUser.uid;
+      _currentUserId = currentUser.id;
       
       // Получаем данные текущего пользователя
-      final user = await firebaseService.getUserById(_currentUserId);
+      final userData = await apiService.getUserById(_currentUserId);
       
-      if (user == null) {
+      if (userData == null) {
         return;
       }
       
+      final user = User.fromJson(userData);
+      
       // Загружаем информацию о друзьях
-      final friendsList = <UserModel>[];
+      final friendsList = <User>[];
       for (final friendId in user.friends) {
-        final friend = await firebaseService.getUserById(friendId);
-        if (friend != null) {
-          friendsList.add(friend);
+        final friendData = await apiService.getUserById(friendId);
+        if (friendData != null) {
+          friendsList.add(User.fromJson(friendData));
         }
       }
       
@@ -93,71 +95,30 @@ class _NewChatScreenState extends State<NewChatScreen> {
     });
   }
   
-  Future<void> _startChat(UserModel friend) async {
+  Future<void> _startChat(User friend) async {
     try {
-      print('Starting chat with friend: ${friend.id} (${friend.username})');
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      
-      if (_currentUserId.isEmpty) {
-        print('Error: Current user ID is empty');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error: Unable to identify current user')),
-        );
-        return;
-      }
-      
-      // Показываем индикатор загрузки
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-      
-      // Создаем или получаем существующий чат между пользователями
-      final chatId = await firebaseService.createDirectChat(_currentUserId, friend.id);
-      print('Chat ID received: $chatId');
-      
-      // Закрываем диалог загрузки
-      if (mounted) {
-        Navigator.pop(context);
-      }
-      
-      if (chatId.isEmpty) {
-        print('Error: Received empty chat ID');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error: Failed to create or find chat')),
-        );
-        return;
-      }
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final chat = await apiService.createChat(friend.id);
       
       if (mounted) {
-        // Закрываем экран выбора друга
-        Navigator.pop(context);
-        
-        // Открываем экран чата
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatScreen(
-              chatId: chatId,
+              chatId: chat.id,
               chatName: friend.displayName ?? friend.username,
               chatType: ChatType.direct,
+              otherUser: friend,
             ),
           ),
         );
       }
     } catch (e) {
-      // Закрываем диалог загрузки, если он открыт
-      if (mounted && Navigator.canPop(context)) {
-        Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating chat: $e')),
+        );
       }
-      
-      print('Error in _startChat: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error starting chat: ${e.toString()}')),
-      );
     }
   }
   

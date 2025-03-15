@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/firebase_service.dart';
-import '../../models/user_model.dart';
+import '../../services/api_service.dart';
+import '../../models/user.dart';
 
 class FriendRequestsScreen extends StatefulWidget {
   const FriendRequestsScreen({super.key});
@@ -12,7 +12,7 @@ class FriendRequestsScreen extends StatefulWidget {
 
 class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
   bool _isLoading = true;
-  List<UserModel> _friendRequests = [];
+  List<User> _friendRequests = [];
   String _currentUserId = '';
 
   @override
@@ -27,28 +27,29 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
     });
 
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      final currentUser = firebaseService.auth.currentUser;
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final currentUser = apiService.currentUser;
       
       if (currentUser == null) {
         return;
       }
       
-      _currentUserId = currentUser.uid;
+      _currentUserId = currentUser.id;
       
       // Получаем текущего пользователя с запросами в друзья
-      final userModel = await firebaseService.getUserById(_currentUserId);
+      final userData = await apiService.getUserById(_currentUserId);
       
-      if (userModel == null) {
+      if (userData == null) {
         return;
       }
       
       // Загружаем данные пользователей, отправивших запросы
-      final requests = <UserModel>[];
-      for (final userId in userModel.friendRequests) {
-        final user = await firebaseService.getUserById(userId);
-        if (user != null) {
-          requests.add(user);
+      final requests = <User>[];
+      final user = User.fromJson(userData);
+      for (final userId in user.friendRequests) {
+        final friendData = await apiService.getUserById(userId);
+        if (friendData != null) {
+          requests.add(User.fromJson(friendData));
         }
       }
       
@@ -68,8 +69,8 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
 
   Future<void> _acceptFriendRequest(String userId) async {
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      await firebaseService.acceptFriendRequest(_currentUserId, userId);
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.acceptFriendRequest(userId);
       
       setState(() {
         _friendRequests.removeWhere((user) => user.id == userId);
@@ -87,8 +88,8 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
 
   Future<void> _rejectFriendRequest(String userId) async {
     try {
-      final firebaseService = Provider.of<FirebaseService>(context, listen: false);
-      await firebaseService.rejectFriendRequest(_currentUserId, userId);
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.rejectFriendRequest(userId);
       
       setState(() {
         _friendRequests.removeWhere((user) => user.id == userId);

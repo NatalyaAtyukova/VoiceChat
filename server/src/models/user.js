@@ -9,6 +9,12 @@ const userSchema = new mongoose.Schema({
         trim: true,
         lowercase: true
     },
+    username: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true
+    },
     password: {
         type: String,
         required: true
@@ -18,14 +24,32 @@ const userSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
-    photoURL: {
+    photoUrl: {
         type: String,
         default: ''
     },
+    friends: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
+    friendRequests: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
     createdAt: {
         type: Date,
         default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
+});
+
+// Update updatedAt timestamp before saving
+userSchema.pre('save', function(next) {
+    this.updatedAt = new Date();
+    next();
 });
 
 // Hash password before saving

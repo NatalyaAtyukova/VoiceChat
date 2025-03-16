@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:project/services/api_service.dart';
 import 'package:project/screens/auth/login_screen.dart';
 import 'package:project/screens/home/home_screen.dart';
+import 'package:project/screens/search/search_screen.dart';
+import 'package:project/screens/friends/friend_requests_screen.dart';
+import 'package:project/screens/friends/friends_list_screen.dart';
+import 'package:project/screens/chat/new_chat_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 
@@ -28,6 +32,14 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const AuthWrapper(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomeScreen(),
+        '/search': (context) => const SearchScreen(),
+        '/friend_requests': (context) => const FriendRequestsScreen(),
+        '/friends': (context) => const FriendsListScreen(),
+        '/new_chat': (context) => const NewChatScreen(),
+      },
     );
   }
 }
@@ -57,8 +69,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
       final apiService = Provider.of<ApiService>(context, listen: false);
       apiService.setToken(token);
       
+      final isAuthenticated = await apiService.checkAuth();
+      
       setState(() {
-        _isAuthenticated = true;
+        _isAuthenticated = isAuthenticated;
         _isLoading = false;
       });
     } else {

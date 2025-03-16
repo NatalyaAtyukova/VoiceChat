@@ -17,11 +17,17 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ message: 'User already exists' });
         }
 
+        // Generate username from email
+        const username = email.split('@')[0];
+
         // Create new user
         const user = new User({
             email,
+            username,
             password,
-            displayName
+            displayName,
+            friends: [],
+            friendRequests: []
         });
 
         await user.save();
@@ -34,8 +40,13 @@ router.post('/register', async (req, res) => {
             user: {
                 id: user._id,
                 email: user.email,
+                username: user.username,
                 displayName: user.displayName,
-                photoURL: user.photoURL
+                photoUrl: user.photoUrl,
+                friends: user.friends,
+                friendRequests: user.friendRequests,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
             }
         });
     } catch (error) {
@@ -68,8 +79,13 @@ router.post('/login', async (req, res) => {
             user: {
                 id: user._id,
                 email: user.email,
+                username: user.username,
                 displayName: user.displayName,
-                photoURL: user.photoURL
+                photoUrl: user.photoUrl,
+                friends: user.friends,
+                friendRequests: user.friendRequests,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
             }
         });
     } catch (error) {
@@ -83,8 +99,13 @@ router.get('/me', auth, async (req, res) => {
         user: {
             id: req.user._id,
             email: req.user.email,
+            username: req.user.username,
             displayName: req.user.displayName,
-            photoURL: req.user.photoURL
+            photoUrl: req.user.photoUrl,
+            friends: req.user.friends,
+            friendRequests: req.user.friendRequests,
+            createdAt: req.user.createdAt,
+            updatedAt: req.user.updatedAt
         }
     });
 });

@@ -16,7 +16,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
-  final _apiService = ApiService();
   bool _isLoading = false;
 
   Future<void> _register() async {
@@ -25,7 +24,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await _apiService.register(
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final response = await apiService.register(
         _emailController.text,
         _passwordController.text,
         _displayNameController.text,

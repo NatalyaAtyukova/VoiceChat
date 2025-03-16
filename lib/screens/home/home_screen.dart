@@ -19,14 +19,24 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late User _currentUser;
+  User? _currentUser;
   List<Chat> _chats = [];
   bool _isLoading = true;
+  int _friendRequestsCount = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUser();
     _loadChats();
+    _checkFriendRequests();
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    setState(() {
+      _currentUser = apiService.currentUser;
+    });
   }
 
   Future<void> _loadChats() async {
@@ -51,6 +61,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _checkFriendRequests() async {
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      if (apiService.currentUser != null) {
+        final userData = await apiService.getUserById(apiService.currentUser!.id);
+        final user = User.fromJson(userData);
+        
+        setState(() {
+          _friendRequestsCount = user.friendRequests.length;
+        });
+      }
+    } catch (e) {
+      print('Error checking friend requests: $e');
+    }
+  }
+
   Future<void> _signOut() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
@@ -64,6 +90,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    _currentUser = apiService.currentUser;
+
+    if (_currentUser == null) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chats'),
@@ -71,24 +108,51 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const SearchScreen(),
-                ),
-              );
+              Navigator.pushNamed(context, '/search');
             },
           ),
           IconButton(
-            icon: const Icon(Icons.person_add),
+            icon: const Icon(Icons.people),
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const FriendRequestsScreen(),
-                ),
-              );
+              Navigator.pushNamed(context, '/friends');
             },
+            tooltip: 'Friends',
+          ),
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.person_add),
+                onPressed: () {
+                  Navigator.pushNamed(context, '/friend_requests').then((_) {
+                    _checkFriendRequests();
+                  });
+                },
+              ),
+              if (_friendRequestsCount > 0)
+                Positioned(
+                  right: 5,
+                  top: 5,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _friendRequestsCount.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -98,12 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const NewChatScreen(),
-            ),
-          );
+          Navigator.pushNamed(context, '/new_chat');
         },
         child: const Icon(Icons.chat),
       ),
@@ -115,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: _chats.length,
                   itemBuilder: (context, index) {
                     final chat = _chats[index];
-                    final otherUser = chat.getOtherParticipant(_currentUser.id);
+                    final otherUser = chat.getOtherParticipant(_currentUser!.id);
 
                     return ListTile(
                       leading: CircleAvatar(

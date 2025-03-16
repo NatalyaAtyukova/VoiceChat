@@ -62,6 +62,33 @@ class ApiService extends ChangeNotifier {
     _currentUser = null;
   }
 
+  // Check token and load user data
+  Future<bool> checkAuth() async {
+    if (_token == null) return false;
+    
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/auth/me'),
+        headers: _getAuthHeaders(),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _currentUser = User.fromJson(data['user']);
+        notifyListeners();
+        return true;
+      } else {
+        _token = null;
+        _currentUser = null;
+        return false;
+      }
+    } catch (e) {
+      _token = null;
+      _currentUser = null;
+      return false;
+    }
+  }
+
   // User methods
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     final response = await http.get(
@@ -98,6 +125,17 @@ class ApiService extends ChangeNotifier {
 
     if (response.statusCode != 201) {
       throw Exception(jsonDecode(response.body)['message'] ?? 'Failed to send friend request');
+    }
+  }
+
+  Future<void> cancelFriendRequest(String userId) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/users/friends/requests/$userId'),
+      headers: _getAuthHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(jsonDecode(response.body)['message'] ?? 'Failed to cancel friend request');
     }
   }
 

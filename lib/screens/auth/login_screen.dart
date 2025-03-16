@@ -16,7 +16,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _apiService = ApiService();
   bool _isLoading = false;
 
   Future<void> _login() async {
@@ -25,7 +24,8 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await _apiService.login(
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final response = await apiService.login(
         _emailController.text,
         _passwordController.text,
       );

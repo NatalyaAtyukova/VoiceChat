@@ -52,6 +52,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _currentlyPlayingId;
   bool _mounted = true;
   String? _currentUserId;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -69,6 +70,7 @@ class _ChatScreenState extends State<ChatScreen> {
     audioPlayer.dispose();
     recorder.dispose();
     _recordingTimer?.cancel();
+    _refreshTimer?.cancel();
     _mounted = false;
     super.dispose();
   }
@@ -106,7 +108,13 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages = messages;
           _isLoading = false;
         });
+        
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottom();
+        });
       }
+      
+      _setupMessageRefresh();
     } catch (e) {
       print('Error loading messages: $e');
       if (_mounted) {
@@ -531,6 +539,40 @@ class _ChatScreenState extends State<ChatScreen> {
           SnackBar(content: Text('Error picking image: $e')),
         );
       }
+    }
+  }
+
+  void _setupMessageRefresh() {
+    _refreshTimer?.cancel();
+    
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (!_mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      _refreshMessages();
+    });
+  }
+  
+  Future<void> _refreshMessages() async {
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final messages = await apiService.getChatMessages(widget.chatId);
+      
+      if (_mounted && messages.length != _messages.length) {
+        setState(() {
+          _messages = messages;
+        });
+        
+        if (messages.length > _messages.length) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToBottom();
+          });
+        }
+      }
+    } catch (e) {
+      print('Error refreshing messages: $e');
     }
   }
 } 

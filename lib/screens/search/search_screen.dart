@@ -17,11 +17,13 @@ class _SearchScreenState extends State<SearchScreen> {
   List<User> _searchResults = [];
   bool _isLoading = false;
   String _currentUserId = '';
+  List<String> _sentRequests = [];
+  List<String> _friends = [];
 
   @override
   void initState() {
     super.initState();
-    _getCurrentUserId();
+    _getCurrentUserData();
   }
 
   @override
@@ -30,13 +32,25 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  Future<void> _getCurrentUserId() async {
+  Future<void> _getCurrentUserData() async {
     final apiService = Provider.of<ApiService>(context, listen: false);
     final currentUser = apiService.currentUser;
     if (currentUser != null) {
-      setState(() {
-        _currentUserId = currentUser.id;
-      });
+      try {
+        final userData = await apiService.getUserById(currentUser.id);
+        final user = User.fromJson(userData);
+        
+        setState(() {
+          _currentUserId = currentUser.id;
+          _friends = user.friends;
+          // Здесь нужно получить список отправленных запросов
+          // Это может потребовать дополнительного API-метода
+        });
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading user data: ${e.toString()}')),
+        );
+      }
     }
   }
 
@@ -100,6 +114,11 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final apiService = Provider.of<ApiService>(context, listen: false);
       await apiService.sendFriendRequest(user.id);
+      
+      setState(() {
+        _sentRequests.add(user.id);
+      });
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Friend request sent!')),
       );
@@ -108,6 +127,33 @@ class _SearchScreenState extends State<SearchScreen> {
         SnackBar(content: Text('Error sending friend request: ${e.toString()}')),
       );
     }
+  }
+
+  Future<void> _cancelFriendRequest(User user) async {
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.cancelFriendRequest(user.id);
+      
+      setState(() {
+        _sentRequests.remove(user.id);
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Friend request cancelled')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error cancelling friend request: ${e.toString()}')),
+      );
+    }
+  }
+
+  bool _isFriend(String userId) {
+    return _friends.contains(userId);
+  }
+
+  bool _hasSentRequest(String userId) {
+    return _sentRequests.contains(userId);
   }
 
   @override
@@ -171,6 +217,9 @@ class _SearchScreenState extends State<SearchScreen> {
                         itemCount: _searchResults.length,
                         itemBuilder: (context, index) {
                           final user = _searchResults[index];
+                          final isFriend = _isFriend(user.id);
+                          final hasSentRequest = _hasSentRequest(user.id);
+                          
                           return ListTile(
                             leading: CircleAvatar(
                               backgroundImage: user.photoUrl?.isNotEmpty == true
@@ -189,10 +238,24 @@ class _SearchScreenState extends State<SearchScreen> {
                                   icon: const Icon(Icons.chat),
                                   onPressed: () => _startChat(user),
                                 ),
-                                IconButton(
-                                  icon: const Icon(Icons.person_add),
-                                  onPressed: () => _sendFriendRequest(user),
-                                ),
+                                if (isFriend)
+                                  const Chip(
+                                    label: Text('Friend'),
+                                    backgroundColor: Colors.green,
+                                    labelStyle: TextStyle(color: Colors.white),
+                                  )
+                                else if (hasSentRequest)
+                                  IconButton(
+                                    icon: const Icon(Icons.person_remove, color: Colors.orange),
+                                    onPressed: () => _cancelFriendRequest(user),
+                                    tooltip: 'Cancel request',
+                                  )
+                                else
+                                  IconButton(
+                                    icon: const Icon(Icons.person_add),
+                                    onPressed: () => _sendFriendRequest(user),
+                                    tooltip: 'Send friend request',
+                                  ),
                               ],
                             ),
                             onTap: () => _startChat(user),

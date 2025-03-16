@@ -242,49 +242,99 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<Message> sendTextMessage(String chatId, String content) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/chat/$chatId/messages'),
-      headers: _getAuthHeaders(),
-      body: jsonEncode({
-        'content': content,
-        'type': 'text',
-      }),
+    // Создаем временное сообщение со статусом "отправляется"
+    final tempMessage = Message(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      chatId: chatId,
+      senderId: _currentUser!.id,
+      type: MessageType.text,
+      content: content,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
     );
+    
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/chat/$chatId/messages'),
+        headers: _getAuthHeaders(),
+        body: jsonEncode({
+          'content': content,
+          'type': 'text',
+        }),
+      );
 
-    if (response.statusCode == 201) {
-      return Message.fromJson(jsonDecode(response.body));
-    } else {
-      throw Exception(jsonDecode(response.body)['message'] ?? 'Failed to send message');
+      if (response.statusCode == 201) {
+        return Message.fromJson(jsonDecode(response.body));
+      } else {
+        // Возвращаем сообщение с ошибкой
+        return tempMessage.copyWith(status: MessageStatus.error);
+      }
+    } catch (e) {
+      // Возвращаем сообщение с ошибкой
+      return tempMessage.copyWith(status: MessageStatus.error);
     }
   }
 
   Future<Message> sendFileMessage(String chatId, File file, String type, {int? duration}) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl/chat/$chatId/messages/file'),
+    // Создаем временное сообщение со статусом "отправляется"
+    final tempMessage = Message(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      chatId: chatId,
+      senderId: _currentUser!.id,
+      type: type == 'image' ? MessageType.image : MessageType.voice,
+      content: '',
+      timestamp: DateTime.now(),
+      duration: duration,
+      status: MessageStatus.sending,
     );
+    
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/chat/$chatId/messages/file'),
+      );
 
-    request.headers.addAll(_getAuthHeaders());
-    request.fields['type'] = type;
-    if (duration != null) {
-      request.fields['duration'] = duration.toString();
+      request.headers.addAll(_getAuthHeaders());
+      request.fields['type'] = type;
+      if (duration != null) {
+        request.fields['duration'] = duration.toString();
+      }
+
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        file.path,
+        contentType: type == 'image' 
+            ? MediaType('image', 'jpeg')
+            : MediaType('audio', 'wav'),
+      ));
+
+      final response = await request.send();
+      final responseData = await response.stream.bytesToString();
+
+      if (response.statusCode == 201) {
+        return Message.fromJson(jsonDecode(responseData));
+      } else {
+        // Возвращаем сообщение с ошибкой
+        return tempMessage.copyWith(status: MessageStatus.error);
+      }
+    } catch (e) {
+      // Возвращаем сообщение с ошибкой
+      return tempMessage.copyWith(status: MessageStatus.error);
     }
+  }
 
-    request.files.add(await http.MultipartFile.fromPath(
-      'file',
-      file.path,
-      contentType: type == 'image' 
-          ? MediaType('image', 'jpeg')
-          : MediaType('audio', 'wav'),
-    ));
+  Future<void> markMessagesAsRead(String chatId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/chat/$chatId/messages/read'),
+        headers: _getAuthHeaders(),
+      );
 
-    final response = await request.send();
-    final responseData = await response.stream.bytesToString();
-
-    if (response.statusCode == 201) {
-      return Message.fromJson(jsonDecode(responseData));
-    } else {
-      throw Exception(jsonDecode(responseData)['message'] ?? 'Failed to send file');
+      if (response.statusCode != 200) {
+        throw Exception(jsonDecode(response.body)['message'] ?? 'Failed to mark messages as read');
+      }
+    } catch (e) {
+      print('Error marking messages as read: $e');
     }
   }
 

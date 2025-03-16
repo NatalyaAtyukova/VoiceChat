@@ -4,6 +4,7 @@ const path = require('path');
 const Chat = require('../models/chat');
 const auth = require('../middleware/auth');
 const config = require('../config');
+const Message = require('../models/message');
 
 const router = express.Router();
 
@@ -89,70 +90,139 @@ router.get('/:chatId/messages', auth, async (req, res) => {
     }
 });
 
-// Send text message
+// Отправить текстовое сообщение в чат
 router.post('/:chatId/messages', auth, async (req, res) => {
-    try {
-        const { content } = req.body;
-        const chat = await Chat.findOne({
-            _id: req.params.chatId,
-            participants: req.user._id
-        });
+  try {
+    const { content, type = 'text' } = req.body;
+    const chatId = req.params.chatId;
+    const userId = req.user.id;
 
-        if (!chat) {
-            return res.status(404).json({ message: 'Chat not found' });
-        }
-
-        const message = {
-            sender: req.user._id,
-            type: 'text',
-            content
-        };
-
-        chat.messages.push(message);
-        chat.lastMessage = message;
-        await chat.save();
-
-        await chat.populate('messages.sender', 'displayName email photoURL');
-        res.status(201).json(message);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
+    // Проверяем, существует ли чат
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
     }
+
+    // Проверяем, является ли пользователь участником чата
+    if (!chat.participants.includes(userId)) {
+      return res.status(403).json({ message: 'You are not a participant of this chat' });
+    }
+
+    // Создаем новое сообщение
+    const message = new Message({
+      chatId,
+      senderId: userId,
+      type,
+      content,
+      status: 'sent',
+      readBy: [userId], // Отправитель автоматически считается прочитавшим сообщение
+    });
+
+    await message.save();
+
+    // Обновляем последнее сообщение в чате
+    chat.lastMessage = message._id;
+    await chat.save();
+
+    // Получаем обновленное сообщение с заполненными полями
+    const populatedMessage = await Message.findById(message._id);
+
+    res.status(201).json(populatedMessage);
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Send file message (image or voice)
+// Отправить файловое сообщение в чат
 router.post('/:chatId/messages/file', auth, upload.single('file'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded' });
-        }
+  try {
+    const { type = 'image', duration } = req.body;
+    const chatId = req.params.chatId;
+    const userId = req.user.id;
+    const file = req.file;
 
-        const chat = await Chat.findOne({
-            _id: req.params.chatId,
-            participants: req.user._id
-        });
-
-        if (!chat) {
-            return res.status(404).json({ message: 'Chat not found' });
-        }
-
-        const fileURL = `/uploads/${req.file.filename}`;
-        const message = {
-            sender: req.user._id,
-            type: req.body.type || 'image',
-            content: req.body.content || 'File message',
-            fileURL,
-            duration: req.body.duration
-        };
-
-        chat.messages.push(message);
-        chat.lastMessage = message;
-        await chat.save();
-
-        await chat.populate('messages.sender', 'displayName email photoURL');
-        res.status(201).json(message);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
     }
+
+    // Проверяем, существует ли чат
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    // Проверяем, является ли пользователь участником чата
+    if (!chat.participants.includes(userId)) {
+      return res.status(403).json({ message: 'You are not a participant of this chat' });
+    }
+
+    // Загружаем файл в хранилище
+    const fileURL = `${config.serverUrl}/uploads/${file.filename}`;
+
+    // Создаем новое сообщение
+    const message = new Message({
+      chatId,
+      senderId: userId,
+      type,
+      content: '',
+      fileURL,
+      duration: duration ? parseInt(duration) : undefined,
+      status: 'sent',
+      readBy: [userId], // Отправитель автоматически считается прочитавшим сообщение
+    });
+
+    await message.save();
+
+    // Обновляем последнее сообщение в чате
+    chat.lastMessage = message._id;
+    await chat.save();
+
+    // Получаем обновленное сообщение с заполненными полями
+    const populatedMessage = await Message.findById(message._id);
+
+    res.status(201).json(populatedMessage);
+  } catch (error) {
+    console.error('Error sending file message:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Отметить сообщения в чате как прочитанные
+router.post('/:chatId/messages/read', auth, async (req, res) => {
+  try {
+    const chatId = req.params.chatId;
+    const userId = req.user.id;
+
+    // Проверяем, существует ли чат
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    // Проверяем, является ли пользователь участником чата
+    if (!chat.participants.includes(userId)) {
+      return res.status(403).json({ message: 'You are not a participant of this chat' });
+    }
+
+    // Обновляем все сообщения, отправленные не текущим пользователем
+    await Message.updateMany(
+      { 
+        chatId: chatId, 
+        senderId: { $ne: userId },
+        readBy: { $ne: userId }
+      },
+      { 
+        $addToSet: { readBy: userId },
+        $set: { read: true }
+      }
+    );
+
+    return res.status(200).json({ message: 'Messages marked as read' });
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 module.exports = router; 

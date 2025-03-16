@@ -61,6 +61,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _getCurrentUserId();
     _loadMessages();
     _requestPermissions();
+    
+    // Отмечаем сообщения как прочитанные при открытии чата
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _markMessagesAsRead();
+    });
   }
 
   @override
@@ -136,11 +141,37 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       final apiService = Provider.of<ApiService>(context, listen: false);
+      
+      // Создаем временное сообщение для отображения
+      final tempMessage = Message(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        chatId: widget.chatId,
+        senderId: _currentUserId!,
+        type: MessageType.text,
+        content: content,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _messages.add(tempMessage);
+        });
+        _scrollToBottom();
+      }
+      
+      // Отправляем сообщение
       final message = await apiService.sendTextMessage(widget.chatId, content);
       
       if (mounted) {
         setState(() {
-          _messages.add(message);
+          // Заменяем временное сообщение на полученное от сервера
+          final index = _messages.indexWhere((m) => m.id == tempMessage.id);
+          if (index != -1) {
+            _messages[index] = message;
+          } else {
+            _messages.add(message);
+          }
         });
         _scrollToBottom();
       }
@@ -156,11 +187,37 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendImageMessage(File imageFile) async {
     try {
       final apiService = Provider.of<ApiService>(context, listen: false);
+      
+      // Создаем временное сообщение для отображения
+      final tempMessage = Message(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        chatId: widget.chatId,
+        senderId: _currentUserId!,
+        type: MessageType.image,
+        content: '',
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _messages.add(tempMessage);
+        });
+        _scrollToBottom();
+      }
+      
+      // Отправляем сообщение
       final message = await apiService.sendFileMessage(widget.chatId, imageFile, 'image');
       
       if (mounted) {
         setState(() {
-          _messages.add(message);
+          // Заменяем временное сообщение на полученное от сервера
+          final index = _messages.indexWhere((m) => m.id == tempMessage.id);
+          if (index != -1) {
+            _messages[index] = message;
+          } else {
+            _messages.add(message);
+          }
         });
         _scrollToBottom();
       }
@@ -176,6 +233,27 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendVoiceMessage(File audioFile, int duration) async {
     try {
       final apiService = Provider.of<ApiService>(context, listen: false);
+      
+      // Создаем временное сообщение для отображения
+      final tempMessage = Message(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        chatId: widget.chatId,
+        senderId: _currentUserId!,
+        type: MessageType.voice,
+        content: '',
+        timestamp: DateTime.now(),
+        duration: duration,
+        status: MessageStatus.sending,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _messages.add(tempMessage);
+        });
+        _scrollToBottom();
+      }
+      
+      // Отправляем сообщение
       final message = await apiService.sendFileMessage(
         widget.chatId,
         audioFile,
@@ -185,7 +263,13 @@ class _ChatScreenState extends State<ChatScreen> {
       
       if (mounted) {
         setState(() {
-          _messages.add(message);
+          // Заменяем временное сообщение на полученное от сервера
+          final index = _messages.indexWhere((m) => m.id == tempMessage.id);
+          if (index != -1) {
+            _messages[index] = message;
+          } else {
+            _messages.add(message);
+          }
         });
         _scrollToBottom();
       }
@@ -442,11 +526,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessageContent(Message message, bool isCurrentUser) {
     switch (message.type) {
       case MessageType.text:
-        return Text(
-          message.content,
-          style: TextStyle(
-            color: isCurrentUser ? Colors.white : Colors.black,
-          ),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              message.content,
+              style: TextStyle(
+                color: isCurrentUser ? Colors.white : Colors.black,
+              ),
+            ),
+            if (isCurrentUser)
+              _buildMessageStatus(message),
+          ],
         );
       
       case MessageType.image:
@@ -455,19 +546,30 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: CachedNetworkImage(
-                imageUrl: message.fileURL ?? '',
-                placeholder: (context, url) => const SizedBox(
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-                errorWidget: (context, url, error) => const SizedBox(
-                  height: 200,
-                  child: Center(child: Icon(Icons.error)),
-                ),
-                fit: BoxFit.cover,
-                width: 200,
-              ),
+              child: message.fileURL != null
+                ? CachedNetworkImage(
+                    imageUrl: message.fileURL!,
+                    placeholder: (context, url) => const SizedBox(
+                      height: 200,
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                    errorWidget: (context, url, error) => const SizedBox(
+                      height: 200,
+                      child: Center(child: Icon(Icons.error)),
+                    ),
+                    fit: BoxFit.cover,
+                    width: 200,
+                  )
+                : Container(
+                    height: 200,
+                    width: 200,
+                    color: Colors.grey[300],
+                    child: Center(
+                      child: message.status == MessageStatus.sending
+                          ? const CircularProgressIndicator()
+                          : const Icon(Icons.error),
+                    ),
+                  ),
             ),
             if (message.content.isNotEmpty)
               Padding(
@@ -479,32 +581,108 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
+            if (isCurrentUser)
+              _buildMessageStatus(message),
           ],
         );
       
       case MessageType.voice:
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            IconButton(
-              icon: Icon(
-                _currentlyPlayingId == message.fileURL
-                    ? Icons.stop
-                    : Icons.play_arrow,
-                color: isCurrentUser ? Colors.white : Colors.black,
-              ),
-              onPressed: () => _playVoiceMessage(message.fileURL!),
-            ),
-            if (message.duration != null)
-              Text(
-                _formatDuration(message.duration!),
-                style: TextStyle(
-                  color: isCurrentUser ? Colors.white : Colors.black,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    _currentlyPlayingId == message.fileURL
+                        ? Icons.stop
+                        : Icons.play_arrow,
+                    color: isCurrentUser ? Colors.white : Colors.black,
+                  ),
+                  onPressed: message.fileURL != null
+                      ? () => _playVoiceMessage(message.fileURL!)
+                      : null,
                 ),
-              ),
+                if (message.duration != null)
+                  Text(
+                    _formatDuration(message.duration!),
+                    style: TextStyle(
+                      color: isCurrentUser ? Colors.white : Colors.black,
+                    ),
+                  ),
+                if (message.status == MessageStatus.sending)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: isCurrentUser ? Colors.white : Colors.black,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (isCurrentUser)
+              _buildMessageStatus(message),
           ],
         );
     }
+  }
+
+  Widget _buildMessageStatus(Message message) {
+    IconData? icon;
+    Color color = Colors.white70;
+    
+    switch (message.status) {
+      case MessageStatus.sending:
+        return const SizedBox(
+          width: 12,
+          height: 12,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white70,
+          ),
+        );
+      case MessageStatus.sent:
+        icon = Icons.check;
+        break;
+      case MessageStatus.delivered:
+        icon = Icons.done_all;
+        break;
+      case MessageStatus.read:
+        icon = Icons.done_all;
+        color = Colors.blue;
+        break;
+      case MessageStatus.error:
+        icon = Icons.error_outline;
+        color = Colors.red;
+        break;
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.only(top: 4.0),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _formatTime(message.timestamp),
+            style: TextStyle(
+              fontSize: 10,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Icon(
+            icon,
+            size: 14,
+            color: color,
+          ),
+        ],
+      ),
+    );
   }
 
   void _scrollToBottom() {
@@ -573,6 +751,15 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       print('Error refreshing messages: $e');
+    }
+  }
+
+  Future<void> _markMessagesAsRead() async {
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.markMessagesAsRead(widget.chatId);
+    } catch (e) {
+      print('Error marking messages as read: $e');
     }
   }
 } 
